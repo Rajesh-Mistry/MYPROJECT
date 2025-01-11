@@ -1,8 +1,7 @@
 import sqlite3
 import yfinance as yf
-import pandas as pd
 
-# List of stock symbols
+# List of Nifty 50 stock symbols
 stocks = [
     "AAPL", "NVDA", "MSFT", "AVGO", "META", "AMZN", "TSLA", "COST", "GOOGL", "GOOG",
     "NFLX", "TMUS", "AMD", "PEP", "LIN", "CSCO", "ADBE", "QCOM", "ISRG", "TXN",
@@ -17,8 +16,11 @@ stocks = [
     "DLTR"
 ]
 
+
+# stocks = [i + ".NS" for i in nifty_50_symbol]
+
 # Connect to SQLite database
-conn = sqlite3.connect('../StockDZSZNDX.db')
+conn = sqlite3.connect('StockDZSZNDX.db')
 cursor = conn.cursor()
 
 # Drop existing table and create a new one
@@ -140,49 +142,47 @@ def calculate_zone_price_range(classified_candles, stock_data, zone_type, start_
     
     else:
         return None
-
-# Function to update zone status based on EMA 20
 def update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date):
-    """
-    Determines the status of the zone (Active, Tested, or Violated) based on stock data and EMA 20.
-    Args:
-        stock_data: DataFrame containing historical stock data.
-        price_range_high: High value of the zone (supply zone or demand zone).
-        price_range_low: Low value of the zone (supply zone or demand zone).
-        zone_type: The type of zone ('Supply Zone' or 'Demand Zone').
-        start_date: The start date of the zone.
-        end_date: The end date of the zone.
-    Returns:
-        zone_status: One of "Active", "Tested", or "Violated".
-    """
     zone_status = "Active"  # Default to Active
+    
+    # Find the indices for the start_date and end_date
+    start_index = stock_data.index.get_loc(start_date)
+    end_index = stock_data.index.get_loc(end_date)
 
-    # Calculate the 20-period EMA
-    stock_data['EMA20'] = stock_data['Close'].ewm(span=20, adjust=False).mean()
-    
-    # Get the EMA values for the end_date
-    end_ema = stock_data.loc[end_date, 'EMA20']
-    
-    # Check zone conditions
-    if zone_type == "Demand Zone" and price_range_high > end_ema:
-        zone_status = "Violated"  # Violated if price range high is above EMA20
-    elif zone_type == "Supply Zone" and price_range_low < end_ema:
-        zone_status = "Violated"  # Violated if price range low is below EMA20
-    else:
-        # Check the status of the zone based on price movements
-        next_candles = stock_data.loc[end_date:].iloc[1:]  # Next candles after zone
-        for i, row in next_candles.iterrows():
-            current_close = row['Close']
-            if zone_type == "Supply Zone" and current_close > price_range_high:
+    # Get the candles immediately after the zone (next candles)
+    next_candles = stock_data.iloc[end_index + 1:]  # Next 2 or 3 candles after the zone
+
+    # Print the zone boundaries for debugging
+    print(f"Checking zone status from {start_date} to {end_date}. Zone Price range: High = {price_range_high}, Low = {price_range_low}")
+
+    for i in range(len(next_candles)):
+        current_high = next_candles['High'].iloc[i]
+        current_low = next_candles['Low'].iloc[i]
+        current_close = next_candles['Close'].iloc[i]
+
+        # Print the current price levels for debugging
+        print(f"Checking next candle at index {i}. Current High: {current_high}, Current Low: {current_low}, Current Close: {current_close}")
+
+        # Check if the price violates the zone
+        if zone_type == "Supply Zone":
+            if current_close > price_range_high:
                 zone_status = "Violated"
+                print(f"Supply Zone violated: Close {current_close} > High {price_range_high}")
                 break
-            elif zone_type == "Demand Zone" and current_close < price_range_low:
-                zone_status = "Violated"
-                break
-            elif price_range_low <= row['Low'] <= price_range_high:
+            elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
                 zone_status = "Tested"
-    
+                print(f"Supply Zone tested: Price in range [{price_range_low}, {price_range_high}]")
+        elif zone_type == "Demand Zone":
+            if current_close < price_range_low:
+                zone_status = "Violated"
+                print(f"Demand Zone violated: Close {current_close} < Low {price_range_low}")
+                break
+            elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
+                zone_status = "Tested"
+                print(f"Demand Zone tested: Price in range [{price_range_low}, {price_range_high}]")
+
     return zone_status
+
 
 # Function to analyze Demand and Supply Zones for each stock symbol
 def analyze_zones(stock_symbol):
@@ -279,7 +279,7 @@ def analyze_zones(stock_symbol):
             if result is not None and len(base_candles) < 7 and len(base_candles) != 0:
                 # Calculate zone price range
                 start_date, end_date, price_range_high, price_range_low = result
-                # Determine zone status based on EMA 20 and price ranges
+                # Determine zone status
                 zone_status = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
                 
                 print(f"Zone found for {stock_symbol}: {zone_type} from {start_date} to {end_date} "

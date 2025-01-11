@@ -24,7 +24,7 @@ nifty_200_symbols = [
 nifty_200_symbols = [i + ".NS" for i in nifty_200_symbols]
 
 # Connect to SQLite database
-conn = sqlite3.connect('StockDZSZ.db')
+conn = sqlite3.connect('../StockDZSZ.db')
 cursor = conn.cursor()
 
 # Drop existing table and create a new one
@@ -266,23 +266,31 @@ def analyze_zones(stock_symbol):
             
             if first_candle_color == 'r' and second_candle_color == 'r':
                 zone_type = 'Supply Zone'  # Reversal Bottom
+                xa = min(classified_candles[end_date]["open"], classified_candles[end_date]["close"])
+                wick = classified_candles[end_date]["low"] - xa
                 zone_classification = 'DBD'
             elif first_candle_color == 'g' and second_candle_color == 'g':
                 zone_type = 'Demand Zone'  # Reversal Double
                 zone_classification = 'RBR'
+                xa = max(classified_candles[end_date]["open"], classified_candles[end_date]["close"])
+                wick = classified_candles[end_date]["high"] - xa
             if first_candle_color == 'r' and second_candle_color == 'g':
                 zone_type = 'Demand Zone'  # Reversal Bottom
                 zone_classification = 'DBR'
+                xa = max(classified_candles[end_date]["open"], classified_candles[end_date]["close"])
+                wick = classified_candles[end_date]["high"] - xa
             elif first_candle_color == 'g' and second_candle_color == 'r':
                 zone_type = 'Supply Zone'  # Reversal Double
                 zone_classification = 'RBD'
+                xa = min(classified_candles[end_date]["open"], classified_candles[end_date]["close"])
+                wick = classified_candles[end_date]["low"] - xa
             else:
                 zone_type = 'Neutral'
                 zone_classification = 'None'
                 
             start_index = stock_data.index.get_loc(start_date)
             end_index = stock_data.index.get_loc(end_date)
-
+            del_OC = abs(classified_candles[end_date]["open"] - classified_candles[end_date]["close"])
             base_candles = [
                 classified_candles[stock_data.index[i].strftime('%Y-%m-%d')] 
                 for i in range(start_index + 1, end_index)  # Exclude long candles themselves
@@ -301,7 +309,8 @@ def analyze_zones(stock_symbol):
                 start_date, end_date, price_range_high, price_range_low = result
                 # Determine zone status
                 zone_status = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
-                
+                if wick > (0.1*del_OC):
+                    zone_status = "Bad"
                 print(f"Zone found for {stock_symbol}: {zone_type} from {start_date} to {end_date} "
                       f"Price Range: {price_range_high} - {price_range_low} Status: {zone_status}")
                 

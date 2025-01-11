@@ -29,9 +29,9 @@ conn = sqlite3.connect('../StockTest.db')
 cursor = conn.cursor()
 
 # Drop existing table and create a new one
-cursor.execute("DROP TABLE IF EXISTS _1hr;")
+cursor.execute("DROP TABLE IF EXISTS demand_supply_zones;")
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS demand_supply_zones_1hr (
+CREATE TABLE IF NOT EXISTS demand_supply_zones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT,
     start_date TEXT,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS demand_supply_zones_1hr (
 conn.commit()
 
 # Clean the table before inserting new data
-cursor.execute("DELETE FROM demand_supply_zones_1hr;")
+cursor.execute("DELETE FROM demand_supply_zones;")
 
 def update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date):
     """
@@ -232,13 +232,34 @@ def is_last_long_candle_valid(zone_start_index, zone_end_index, stock_data, long
         print("No long candle found in the zone.")
         return False
 
+def merge_to_2_hour_candles(stock_data):
+    """
+    Merges consecutive 1-hour candles into 2-hour candles, ensuring the 2-hour candles start at odd hours like 9, 11, 13, 15, etc.
+    Returns a new DataFrame with 2-hour candles.
+    """
+    two_hour_candles = []
+    
+    # Iterate over the stock data by stepping through the candles
+    for i in range(0, len(stock_data) - 1, 2):  # Step by 2 to combine two 1-hour candles
+        # Ensure that the first candle of the pair starts at an odd hour (like 9, 11, etc.)
+        if stock_data.index[i].hour % 2 == 1:
+            o = stock_data.iloc[i]['Open']
+            c = stock_data.iloc[i + 1]['Close']
+            h = max(stock_data.iloc[i]['High'], stock_data.iloc[i + 1]['High'])
+            l = min(stock_data.iloc[i]['Low'], stock_data.iloc[i + 1]['Low'])
+            two_hour_candles.append([stock_data.index[i], o, h, l, c])
+    
+    # Create a DataFrame with the 2-hour candles
+    two_hour_df = pd.DataFrame(two_hour_candles, columns=['Date', 'Open', 'High', 'Low', 'Close'])
+    two_hour_df.set_index('Date', inplace=True)
+    return two_hour_df
 
 # The analyze_zones function needs slight modification to accommodate the 1-hour data
 def analyze_zones(stock_symbol):
     try:
         # Download the stock data with 1-hour intervals for the last 3 months
-        stock_data = yf.download(stock_symbol, period="1mo", interval="1h")
-        # stock_data = merge_to_2_hour_candles(stock_data1)
+        stock_data1 = yf.download(stock_symbol, period="1mo", interval="1h")
+        stock_data = merge_to_2_hour_candles(stock_data1)
         # If no data is returned, skip this symbol
         if stock_data.empty:
             print(f"Warning: No data found for {stock_symbol}. Skipping.")
@@ -346,7 +367,7 @@ def analyze_zones(stock_symbol):
                     f"Price Range: {price_range_high} - {price_range_low} Status: {zone_status}")
                 
                 cursor.execute("""
-                    INSERT INTO demand_supply_zones_1hr (symbol, start_date, end_date, base_candles_count, zone_type, 
+                    INSERT INTO demand_supply_zones (symbol, start_date, end_date, base_candles_count, zone_type, 
                     zone_classification, price_range_high, price_range_low, zone_status)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (stock_symbol, start_date, end_date, base_candle_count, zone_type,
