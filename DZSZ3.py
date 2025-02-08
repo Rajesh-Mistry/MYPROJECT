@@ -29,7 +29,7 @@ conn = sqlite3.connect('../StockTest.db')
 cursor = conn.cursor()
 
 # Drop existing table and create a new one
-cursor.execute("DROP TABLE IF EXISTS _1hr;")
+cursor.execute("DROP TABLE IF EXISTS demand_supply_zones_1hr;")
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS demand_supply_zones_1hr (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS demand_supply_zones_1hr (
     zone_classification TEXT,
     price_range_high REAL,
     price_range_low REAL,
-    zone_status TEXT
+    zone_status TEXT,
+    tested_date TEXT
 )
 """)
 conn.commit()
@@ -62,6 +63,7 @@ def update_zone_status(stock_data, price_range_high, price_range_low, zone_type,
     Returns:
         zone_status: One of "Active", "Tested", or "Violated".
     """
+    tested_date = None
     zone_status = "Active"  # Default to Active
     
     # Find the indices for the start_date and end_date
@@ -91,6 +93,7 @@ def update_zone_status(stock_data, price_range_high, price_range_low, zone_type,
             elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
                 zone_status = "Tested"
                 print(f"Supply Zone tested: Price in range [{price_range_low}, {price_range_high}]")
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Set the tested date when the zone is tested
                 break
         elif zone_type == "Demand Zone":
             if current_close < price_range_low:
@@ -99,9 +102,10 @@ def update_zone_status(stock_data, price_range_high, price_range_low, zone_type,
                 break
             elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
                 zone_status = "Tested"
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Set the tested date when the zone is tested
                 print(f"Demand Zone tested: Price in range [{price_range_low}, {price_range_high}]")
                 break
-    return zone_status
+    return zone_status, tested_date
 
 def calculate_zone_price_range(classified_candles, stock_data, zone_type, start_date, end_date):
     start_candle = classified_candles[start_date]
@@ -339,7 +343,7 @@ def analyze_zones(stock_symbol):
                 # Calculate zone price range
                 start_date, end_date, price_range_high, price_range_low = result
                 # Determine zone status
-                zone_status = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
+                zone_status, tested_date = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
                 if wick > (0.1*del_OC):
                     zone_status = "Bad"
                 print(f"Zone found for {stock_symbol}: {zone_type} from {start_date} to {end_date} "
@@ -347,10 +351,10 @@ def analyze_zones(stock_symbol):
                 
                 cursor.execute("""
                     INSERT INTO demand_supply_zones_1hr (symbol, start_date, end_date, base_candles_count, zone_type, 
-                    zone_classification, price_range_high, price_range_low, zone_status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    zone_classification, price_range_high, price_range_low, zone_status, tested_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,?)""",
                             (stock_symbol, start_date, end_date, base_candle_count, zone_type,
-                                zone_classification, price_range_high, price_range_low, zone_status))
+                                zone_classification, price_range_high, price_range_low, zone_status, tested_date))
                 conn.commit()
 
     except Exception as e:

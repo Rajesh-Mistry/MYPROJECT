@@ -23,7 +23,7 @@ def fetch_active_zones(db_file, timeframe):
     
     if db_file == '../StockDZSZ.db':
         query = f"""
-        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date, end_date, tested_date
+        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date, tested_date
         FROM demand_supply_zones
         WHERE zone_status = 'Tested' AND start_date >= '{date_limit_str}';
         """
@@ -31,13 +31,13 @@ def fetch_active_zones(db_file, timeframe):
         df = pd.read_sql(query, connection)
     else:
         query = f"""
-        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date,end_date, tested_date
+        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date, tested_date
         FROM demand_supply_zones
         WHERE zone_status = 'Tested' AND start_date >= '{date_limit_str}';
         """
         query1 = f"""
-        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date,end_date, tested_date
-        FROM demand_supply_zones_1hr
+        SELECT symbol, zone_type, price_range_high, price_range_low, zone_status, start_date, tested_date
+        FROM demand_supply_zones_1h
         WHERE zone_status = 'Tested' AND start_date >= '{date_limit_str}';
         """
         # Use pandas to load the SQL query results into DataFrames
@@ -64,7 +64,7 @@ def get_current_price(stock_name):
 
 # Function to create the GreenRedList table in the database
 def create_green_red_list_table(db_file):
-    if db_file == "../StockDZSZ.db":
+    if db_file == "../StockDZSZNDX.db":
         connection = sqlite3.connect(db_file)
         cursor = connection.cursor()
         cursor.execute('DROP TABLE IF EXISTS GreenRedList')
@@ -87,7 +87,7 @@ def create_green_red_list_table(db_file):
 
 # Function to insert data into the GreenRedList table
 def insert_into_green_red_list(db_file, data):
-    if db_file == "../StockDZSZ.db":
+    if db_file == "../StockDZSZNDX.db":
         connection = sqlite3.connect(db_file)
         cursor = connection.cursor()
         
@@ -120,7 +120,7 @@ def is_valid_candle(open_price, close_price, high_price, low_price):
 # Function to check if the price is within the zone's range and meets the tested date condition
 def check_price_in_zone(db_file):
     # Determine the appropriate timeframe based on the database file
-    if db_file == "../StockDZSZ.db":
+    if db_file == "../StockDZSZNDX.db":
         timeframe = "1d"
     elif db_file == "../StockTest.db":
         timeframe = "2h"  # default for "demand_supply_zones"
@@ -142,7 +142,6 @@ def check_price_in_zone_with_timeframe(db_file, timeframe, table_name):
         stock_name = row['symbol']
         current_price = get_current_price(stock_name)
         start_date = row['start_date']
-        end_date = row['end_date']
         tested_date = row['tested_date']
         
         # Check if the 'tested_date' format is valid (handle errors gracefully)
@@ -156,14 +155,8 @@ def check_price_in_zone_with_timeframe(db_file, timeframe, table_name):
         except ValueError as e:
             print(f"Error parsing tested date {tested_date}: {e}")
             days_since_tested = None
-        threshhold = None
-        if timeframe == '1h':
-            threshhold = 1
-        elif timeframe == '2h':
-            threshhold = 2
-        else:
-            threshhold = 2
-        if current_price is not None and days_since_tested is not None and days_since_tested < threshhold:
+
+        if current_price is not None and days_since_tested is not None and days_since_tested < 3:
             zone_list = None
             # Determine if it's a Demand or Supply Zone
             if row['zone_type'] == 'Demand Zone':
@@ -191,22 +184,22 @@ def check_price_in_zone_with_timeframe(db_file, timeframe, table_name):
                 data = {
                     'symbol': stock_name,
                     'start_date': start_date,
-                    'end_date': end_date,
+                    'end_date': tested_date,
                     'price_range_high': row['price_range_high'],
                     'price_range_low': row['price_range_low'],
                     'tested_date': tested_date,
                     'timeframe': timeframe,
                     'List': zone_list
                 }
-                insert_into_green_red_list("../StockDZSZ.db", data)
+                insert_into_green_red_list("../StockDZSZNDX.db", data)
 
 # Example usage
-db_file1 = '../StockDZSZ.db'  # Path to your SQLite database file
-db_file2 = '../StockTest.db'  # Path to your other SQLite database file
+db_file1 = '../StockDZSZNDX.db'  # Path to your SQLite database file
+# db_file2 = '../StockTest.db'  # Path to your other SQLite database file
 
 # Create the GreenRedList table if not exists
 create_green_red_list_table(db_file1)
 
 # Check prices in zone for both databases
 check_price_in_zone(db_file1)
-check_price_in_zone(db_file2)
+# check_price_in_zone(db_file2)

@@ -20,7 +20,7 @@ stocks = [
 # stocks = [i + ".NS" for i in nifty_50_symbol]
 
 # Connect to SQLite database
-conn = sqlite3.connect('StockDZSZNDX.db')
+conn = sqlite3.connect('../StockDZSZNDX.db')
 cursor = conn.cursor()
 
 # Drop existing table and create a new one
@@ -36,7 +36,24 @@ CREATE TABLE IF NOT EXISTS demand_supply_zones (
     zone_classification TEXT,
     price_range_high REAL,
     price_range_low REAL,
-    zone_status TEXT
+    zone_status TEXT,
+    tested_date Text
+)
+""")
+cursor.execute("DROP TABLE IF EXISTS demand_supply_zones_1h;")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS demand_supply_zones_1h (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    base_candles_count INTEGER,
+    zone_type TEXT,
+    zone_classification TEXT,
+    price_range_high REAL,
+    price_range_low REAL,
+    zone_status TEXT,
+    tested_date Text
 )
 """)
 conn.commit()
@@ -109,9 +126,9 @@ def calculate_zone_price_range(classified_candles, stock_data, zone_type, start_
     end_index = stock_data.index.get_loc(end_date)
 
     base_candles = [
-        classified_candles[stock_data.index[i].strftime('%Y-%m-%d')] 
+        classified_candles[stock_data.index[i].strftime('%Y-%m-%d %H:%M')] 
         for i in range(start_index + 1, end_index) 
-        if classified_candles[stock_data.index[i].strftime('%Y-%m-%d')]["candle_type"] == "Base"
+        if classified_candles[stock_data.index[i].strftime('%Y-%m-%d %H:%M')]["candle_type"] == "Base"
     ]
 
     combined_base_candle = combine_multiple_base_candles(base_candles)
@@ -144,7 +161,7 @@ def calculate_zone_price_range(classified_candles, stock_data, zone_type, start_
         return None
 def update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date):
     zone_status = "Active"  # Default to Active
-    
+    tested_date = None
     # Find the indices for the start_date and end_date
     start_index = stock_data.index.get_loc(start_date)
     end_index = stock_data.index.get_loc(end_date)
@@ -152,7 +169,6 @@ def update_zone_status(stock_data, price_range_high, price_range_low, zone_type,
     # Get the candles immediately after the zone (next candles)
     next_candles = stock_data.iloc[end_index + 1:]  # Next 2 or 3 candles after the zone
 
-    # Print the zone boundaries for debugging
     print(f"Checking zone status from {start_date} to {end_date}. Zone Price range: High = {price_range_high}, Low = {price_range_low}")
 
     for i in range(len(next_candles)):
@@ -160,35 +176,39 @@ def update_zone_status(stock_data, price_range_high, price_range_low, zone_type,
         current_low = next_candles['Low'].iloc[i]
         current_close = next_candles['Close'].iloc[i]
 
-        # Print the current price levels for debugging
         print(f"Checking next candle at index {i}. Current High: {current_high}, Current Low: {current_low}, Current Close: {current_close}")
 
         # Check if the price violates the zone
         if zone_type == "Supply Zone":
             if current_close > price_range_high:
                 zone_status = "Violated"
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Convert to string
                 print(f"Supply Zone violated: Close {current_close} > High {price_range_high}")
                 break
-            elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
+            elif price_range_low <= current_close <= price_range_high:
                 zone_status = "Tested"
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Convert to string
                 print(f"Supply Zone tested: Price in range [{price_range_low}, {price_range_high}]")
         elif zone_type == "Demand Zone":
             if current_close < price_range_low:
                 zone_status = "Violated"
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Convert to string
                 print(f"Demand Zone violated: Close {current_close} < Low {price_range_low}")
                 break
             elif price_range_low <= current_high <= price_range_high or price_range_low <= current_low <= price_range_high:
                 zone_status = "Tested"
+                tested_date = next_candles.index[i].strftime('%Y-%m-%d %H:%M')  # Convert to string
                 print(f"Demand Zone tested: Price in range [{price_range_low}, {price_range_high}]")
 
-    return zone_status
+    print(f"Final Zone Status: {zone_status}, Tested Date: {tested_date}")
+    return zone_status, tested_date if tested_date is not None else None
 
 
 # Function to analyze Demand and Supply Zones for each stock symbol
-def analyze_zones(stock_symbol):
+def analyze_zones(stock_symbol, timeframe):
     try:
         # Download the stock data
-        stock_data = yf.download(stock_symbol, period="3mo", interval="1d")
+        stock_data = yf.download(stock_symbol, period="3mo", interval="1d") if timeframe == '1d' else yf.download(stock_symbol, period="1mo", interval=timeframe)
         
         # If no data is returned, skip this symbol
         if stock_data.empty:
@@ -205,7 +225,7 @@ def analyze_zones(stock_symbol):
 
         # Track long candle dates
         long_candle_dates = [
-            stock_data.index[i].strftime('%Y-%m-%d') 
+            stock_data.index[i].strftime('%Y-%m-%d %H:%M') 
             for i in range(1, len(stock_data))  
             if rounded_candle_sizes[i-1] >= long_candle_threshold
         ]
@@ -224,7 +244,7 @@ def analyze_zones(stock_symbol):
         for i in range(1, len(stock_data)):  # Start from 1
             candle_color = classify_candle_color(i)
             candle_type = "Long" if rounded_candle_sizes[i-1] >= long_candle_threshold else "Base"
-            classified_candles[stock_data.index[i].strftime('%Y-%m-%d')] = {
+            classified_candles[stock_data.index[i].strftime('%Y-%m-%d %H:%M')] = {
                 "close": round(stock_data['Close'][i], 1),
                 "candle_size": rounded_candle_sizes[i-1],
                 "candle_type": candle_type,
@@ -232,7 +252,7 @@ def analyze_zones(stock_symbol):
                 "open": stock_data['Open'][i],
                 "high": stock_data['High'][i],
                 "low": stock_data['Low'][i],
-                "date": stock_data.index[i].strftime('%Y-%m-%d')  # Explicitly add the date
+                "date": stock_data.index[i].strftime('%Y-%m-%d %H:%M')  # Explicitly add the date
             }
 
         # Loop through long candle dates and analyze zones
@@ -264,9 +284,9 @@ def analyze_zones(stock_symbol):
             end_index = stock_data.index.get_loc(end_date)
 
             base_candles = [
-                classified_candles[stock_data.index[i].strftime('%Y-%m-%d')] 
+                classified_candles[stock_data.index[i].strftime('%Y-%m-%d %H:%M')] 
                 for i in range(start_index + 1, end_index)  # Exclude long candles themselves
-                if classified_candles[stock_data.index[i].strftime('%Y-%m-%d')]["candle_type"] == "Base"
+                if classified_candles[stock_data.index[i].strftime('%Y-%m-%d %H:%M')]["candle_type"] == "Base"
             ]
             
             # Count the base candles correctly
@@ -280,25 +300,36 @@ def analyze_zones(stock_symbol):
                 # Calculate zone price range
                 start_date, end_date, price_range_high, price_range_low = result
                 # Determine zone status
-                zone_status = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
+                zone_status, tested_date = update_zone_status(stock_data, price_range_high, price_range_low, zone_type, start_date, end_date)
                 
                 print(f"Zone found for {stock_symbol}: {zone_type} from {start_date} to {end_date} "
                       f"Price Range: {price_range_high} - {price_range_low} Status: {zone_status}")
-                
-                cursor.execute("""
-                    INSERT INTO demand_supply_zones (symbol, start_date, end_date, base_candles_count, zone_type, 
-                    zone_classification, price_range_high, price_range_low, zone_status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                               (stock_symbol, start_date, end_date, base_candle_count, zone_type,
-                                zone_classification, price_range_high, price_range_low, zone_status))
+                if timeframe == '1d':
+                    cursor.execute("""
+                        INSERT INTO demand_supply_zones (symbol, start_date, end_date, base_candles_count, zone_type, 
+                        zone_classification, price_range_high, price_range_low, zone_status, tested_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (stock_symbol, start_date, end_date, base_candle_count, zone_type,
+                        zone_classification, price_range_high, price_range_low, zone_status, tested_date or None))
+                else:
+                    cursor.execute(f"""
+                        INSERT INTO demand_supply_zones_{timeframe} (symbol, start_date, end_date, base_candles_count, zone_type, 
+                        zone_classification, price_range_high, price_range_low, zone_status, tested_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (stock_symbol, start_date, end_date, base_candle_count, zone_type,
+                        zone_classification, price_range_high, price_range_low, zone_status, tested_date or None))
                 conn.commit()
+
+                # conn.commit()
 
     except Exception as e:
         print(f"Error processing {stock_symbol}: {str(e)}")
 
 # Analyze zones for all Nifty 50 symbols
 for symbol in stocks:
-    analyze_zones(symbol)
+    analyze_zones(symbol, '1d')
+    analyze_zones(symbol, '1h')
+    # analyze_zones(symbol, '2h')
 
 # Close the database connection
 conn.close()
